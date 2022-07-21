@@ -133,6 +133,62 @@ So, just over twice the time it took the mmap.
 
 *)  
 
+(* test building a map *)
+module Int_map = Map.Make(Int)
+let test_map_build () =
+  let sz = 10_000_000 in
+  let ints = random_int_list ~size:sz in  
+  let c = Mtime_clock.counter () in
+  let map = ref Int_map.empty in
+  ints |> iter_k (fun ~k:kont xs -> 
+      match xs with
+      | [] -> ()
+      | k::v::rest -> 
+        map := Int_map.add k v !map;
+        kont rest
+      | _ -> failwith "odd sized list");
+  let ms = Mtime_clock.count c |> Mtime.Span.to_ms in
+  Printf.printf "Built map size %d in %.4f ms\n%!" sz ms;
+  !map
+(* Typical outputs:
+Built map size 5000000 in 5374.3092 ms
+Built map size 10000000 in 12397.9498 ms
+
+NOTE the size is the size of the ints used to create the map; keys are not unique so the
+resulting size of the maps will be smaller than otherwise
+*)
+
+let test_map_marshal () =
+  let fn,oc = Filename.open_temp_file ~temp_dir:"." "test_map_marshal" ".m" in
+  let map = test_map_build () in
+  let c = Mtime_clock.counter () in
+  Stdlib.output_value oc map;
+  let ms = Mtime_clock.count c |> Mtime.Span.to_ms in
+  Printf.printf "Marshalled map sized %d to file %s in %.4f ms\n%!" (Int_map.cardinal map) fn ms;
+  ()  
+(* Typical output:
+Built map size 10000000 in 12073.5843 ms
+Marshalled map sized 4988433 to file ./test_map_marshalaed8b8.m in 704.9915 ms
+
+test_map_marshalaed8b8.m was 62M; so probably about 1s for 100M
+*)  
+
+(* following for jane st core library, which has a map module which allows initialization
+   from a sorted array *)
+
+module X = Core.Map
+
+module Comparator_ = Core.Comparator.Make(Core.Int)
+
+let test_jane_st () =
+  let sz = 5_000_000 in
+  let arr = Array.make sz (0,0) in
+  for i = 0 to sz -1 do
+    arr.(i) <- (i,2*i)
+  done;
+  (* WIP *)
+  ()  
+
 let test_fn = "test.tmp"
 
 let _main =
@@ -145,5 +201,11 @@ let _main =
     ()
   | "load_ic" -> 
     load_via_in_channel test_fn;
+    ()
+  | "test_map_build" -> 
+    ignore(test_map_build ());
+    ()     
+  | "test_map_marshal" -> 
+    test_map_marshal ();
     ()
   | _ -> failwith "unknown command line arg"

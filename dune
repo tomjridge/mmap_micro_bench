@@ -2,5 +2,5 @@
 
 (executable
  (name run)
- (libraries unix mtime.clock mtime.clock.os )) ; mtime.clock.os?
+ (libraries unix mtime.clock mtime.clock.os core )) ; mtime.clock.os?
 
