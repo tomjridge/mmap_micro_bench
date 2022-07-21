@@ -1,0 +1,6 @@
+;; from https://dune.readthedocs.io/en/stable/quick-start.html
+
+(executable
+ (name run)
+ (libraries unix mtime.clock mtime.clock.os )) ; mtime.clock.os?
+
