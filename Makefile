@@ -17,6 +17,9 @@ run2: run.exe
 run3: run.exe
 	./run.exe test_map_marshal
 
+run4: run.exe
+	./run.exe test_jane_st
+
 clean:
 	dune clean
 	rm -f ./run.exe *.tmp *.m

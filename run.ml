@@ -62,7 +62,7 @@ end
 
 (* create a file with 15M integers in it (120_000_000 bytes, 115M via ls) *)
 let create fn = 
-  let sz = 15_000_000 in
+  let sz = 10_000_000 in
   let ints = random_int_list ~size:sz in
   let c = Mtime_clock.counter () in
   let mmap = Int_mmap.create ~fn ~sz in
@@ -104,6 +104,27 @@ The takeaway is that reading via mmap seems pretty fast.
 
 *)
 
+let load_and_copy fn =
+  let c = Mtime_clock.counter () in
+  let mmap = Int_mmap.open_ ~fn ~sz:(-1) in
+  let arr = mmap.arr in
+  let sz = Bigarray.Array1.dim arr in
+  (* copy arr as ocaml array *)
+  let arr2 = Array.init sz (fun i -> arr.{i}) in
+  ignore arr2;
+  let ms = Mtime_clock.count c |> Mtime.Span.to_ms in
+  Printf.printf "Loaded and copied, size %d in %.4f ms\n%!" sz ms;
+  ()
+(*
+With cache:
+Loaded and copied, size 10000000 in 74.1206 ms
+Loaded and copied, size 10000000 in 105.4259 ms
+Without cache:
+Loaded and copied, size 10000000 in 92.2408 ms
+
+Timings seem variable, about 100ms
+*)
+
 
 (* following may not be a fair comparison with mmap, but should give an idea of the
    timings for buffered IO *)
@@ -137,25 +158,21 @@ So, just over twice the time it took the mmap.
 module Int_map = Map.Make(Int)
 let test_map_build () =
   let sz = 10_000_000 in
-  let ints = random_int_list ~size:sz in  
+  let arr = Array.make sz (0,0) in
+  for i = 0 to sz -1 do
+    arr.(i) <- (i,2*i)
+  done;
   let c = Mtime_clock.counter () in
   let map = ref Int_map.empty in
-  ints |> iter_k (fun ~k:kont xs -> 
-      match xs with
-      | [] -> ()
-      | k::v::rest -> 
-        map := Int_map.add k v !map;
-        kont rest
-      | _ -> failwith "odd sized list");
+  for i = 0 to sz-1 do
+    map := Int_map.add i (arr.(i)) !map
+  done;
   let ms = Mtime_clock.count c |> Mtime.Span.to_ms in
   Printf.printf "Built map size %d in %.4f ms\n%!" sz ms;
   !map
 (* Typical outputs:
-Built map size 5000000 in 5374.3092 ms
-Built map size 10000000 in 12397.9498 ms
-
-NOTE the size is the size of the ints used to create the map; keys are not unique so the
-resulting size of the maps will be smaller than otherwise
+Built map size 5000000 in 1317.3330 ms
+Built map size 10000000 in 2710.3957 ms
 *)
 
 let test_map_marshal () =
@@ -173,12 +190,18 @@ Marshalled map sized 4988433 to file ./test_map_marshalaed8b8.m in 704.9915 ms
 test_map_marshalaed8b8.m was 62M; so probably about 1s for 100M
 *)  
 
-(* following for jane st core library, which has a map module which allows initialization
-   from a sorted array *)
+(* following for jane st base/core library, which has a map module which allows
+   initialization from a sorted array *)
 
-module X = Core.Map
+module X = Base.Map
 
-module Comparator_ = Core.Comparator.Make(Core.Int)
+(*
+
+Base.Map.of_sorted_array: 
+('a, 'cmp) Base.Comparator.Module.t ->
+('a * 'b) array -> ('a, 'b, 'cmp) X.t Base.Or_error.t
+
+*)
 
 let test_jane_st () =
   let sz = 5_000_000 in
@@ -186,9 +209,72 @@ let test_jane_st () =
   for i = 0 to sz -1 do
     arr.(i) <- (i,2*i)
   done;
-  (* WIP *)
+  let c = Mtime_clock.counter () in
+  let map = Base.Map.of_sorted_array (module Base.Int) arr in
+  let ms = Mtime_clock.count c |> Mtime.Span.to_ms in
+  ignore(map);
+  Printf.printf "Jane St. Map.of_sorted_array built, size %d built in %.4f ms\n%!" sz ms;
   ()  
+(* Typical output:
+Jane St. Map.of_sorted_array built, size 5000000 built in 327.7295 ms
+*)
 
+(* compat shim; remove for 4.14 *)
+module Seq = struct
+  include Seq
+
+(* [init_aux f i j] is the sequence [f i, ..., f (j-1)]. *)
+
+let rec init_aux f i j () =
+  if i < j then begin
+    Cons (f i, init_aux f (i + 1) j)
+  end
+  else
+    Nil
+
+let init n f =
+  if n < 0 then
+    invalid_arg "Seq.init"
+  else
+    init_aux f 0 n
+
+end
+
+
+(* use the Stdlib Map, but build recursively *)
+let test_recursive_build () =
+  let sz = 20_000_000 in
+  let arr = Array.make sz (0,0) in
+  for i = 0 to sz -1 do
+    arr.(i) <- (i,2*i)
+  done;
+  let cutoff = 32 in (* point at which we build the map directly *)
+  let rec f lo hi = 
+    assert(lo <= hi);
+    match hi - lo < cutoff with
+    | true -> 
+      (* build map directly from arr lo .. hi *)
+      Int_map.of_seq (Seq.init (hi - lo +1) (fun i -> arr.(lo+i)))
+    | false -> 
+      let mid = lo + (hi - lo) /2 in
+      let m1 = f lo mid in
+      let m2 = f (mid+1) hi in
+      Int_map.union (fun _k -> assert false) m1 m2
+  in
+  let c = Mtime_clock.counter () in
+  let res = f 0 (sz-1) in
+  let ms = Mtime_clock.count c |> Mtime.Span.to_ms in
+  ignore(res);
+  Printf.printf "Recursive map build, size %d built in %.4f ms\n%!" sz ms;
+  ()
+(*
+Recursive map build, size 5000000 built in 664.2683 ms
+Recursive map build, size 10000000 built in 1355.3488 ms
+Recursive map build, size 20000000 built in 2688.0667 ms
+Seems linear...
+*)
+  
+        
 let test_fn = "test.tmp"
 
 let _main =
@@ -199,6 +285,9 @@ let _main =
   | "load" -> 
     load_and_sum test_fn;
     ()
+  | "load_and_copy" -> 
+    load_and_copy test_fn;
+    ()
   | "load_ic" -> 
     load_via_in_channel test_fn;
     ()
@@ -207,5 +296,11 @@ let _main =
     ()     
   | "test_map_marshal" -> 
     test_map_marshal ();
+    ()
+  | "test_jane_st" -> 
+    test_jane_st ();
+    ()
+  | "test_recursive_build" -> 
+    test_recursive_build ();
     ()
   | _ -> failwith "unknown command line arg"
