@@ -274,6 +274,30 @@ Recursive map build, size 20000000 built in 2688.0667 ms
 Seems linear...
 *)
   
+
+(* test memory overhead: array of ints vs array of pairs of int vs array of triples? *)
+let test_mem_overhead () =
+  let sz0 = 10_000_000 in
+  let sz = sz0 in
+  let arr = Array.init sz (fun i -> i) in
+  let words = Obj.(arr |> repr |> reachable_words) in
+  Printf.printf "(int) Array size %d consumes %d words\n%!" sz words;
+  let sz = (sz/2) in
+  let arr = Array.init sz (fun i -> (i,i+1)) in
+  let words = Obj.(arr |> repr |> reachable_words) in
+  Printf.printf "(int*int) Array size %d consumes %d words\n%!" sz words;
+  ()  
+(*
+Typical output:
+(int) Array size 10000000 consumes 10000001 words
+(int*int) Array size 5000000 consumes 20000001 words
+
+The point is: integer arrays are very efficient; an array containing the same number of
+ints, but stored as pairs, has significantly more overhead.
+*)
+
+
+  
         
 let test_fn = "test.tmp"
 
@@ -302,5 +326,8 @@ let _main =
     ()
   | "test_recursive_build" -> 
     test_recursive_build ();
+    ()
+  | "test_mem_overhead" -> 
+    test_mem_overhead ();
     ()
   | _ -> failwith "unknown command line arg"
