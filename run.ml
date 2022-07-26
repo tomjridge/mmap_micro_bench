@@ -297,6 +297,28 @@ ints, but stored as pairs, has significantly more overhead.
 *)
 
 
+(* mmap seems to slow down the larger the file mapped... maybe slowdown only if there are
+   live pages related to the file? *)
+let test_mmap_with_different_sizes () = 
+  let base_sz = 10_000_000 in
+  for i = 1 to 20 do
+    let sz = i*base_sz in
+    let fn = "test.tmp" in
+    (* create and init map *)
+    (try Unix.unlink fn with _ -> ());
+    let map = Int_mmap.create ~fn ~sz in
+    for j = 0 to sz - 1 do
+      map.arr.{j} <- j;
+    done;
+    (* close *)
+    Int_mmap.close map;
+    (* time the open *)
+    let c = Mtime_clock.counter () in
+    let mmap = Int_mmap.open_ ~fn ~sz:(-1) in
+    let ms = Mtime_clock.count c |> Mtime.Span.to_ms in
+    Int_mmap.close mmap;
+    Printf.printf "test_mmap_with_different_sizes: size %d B in %.4f ms\n%!" (sz*8) ms; 
+  done
   
         
 let test_fn = "test.tmp"
@@ -329,5 +351,8 @@ let _main =
     ()
   | "test_mem_overhead" -> 
     test_mem_overhead ();
+    ()
+  | "test_mmap_with_different_sizes" -> 
+    test_mmap_with_different_sizes ();
     ()
   | _ -> failwith "unknown command line arg"
